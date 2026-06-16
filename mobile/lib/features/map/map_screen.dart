@@ -24,6 +24,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   GoogleMapController? _mapController;
   ActiveLocation? _selectedLocation;
+  _RouteTarget? _customDestination;
   RouteMode _routeMode = RouteMode.motorcycle;
   AsyncValue<RouteResult?> _routeState = const AsyncData(null);
 
@@ -49,6 +50,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               locations: items,
               position: currentPosition,
               selectedLocation: _selectedLocation,
+              customDestination: _customDestination,
               route: route,
               onMapCreated: (controller) {
                 _mapController = controller;
@@ -57,6 +59,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 }
               },
               onMarkerTap: _openDetails,
+              onLongPress: _setCustomDestination,
             ),
             error: (error, _) => _MapMessage(
               icon: Icons.cloud_off_outlined,
@@ -80,6 +83,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     count: activeLocations?.length,
                     isLoading: locations.isLoading,
                     onRefresh: _refresh,
+                    onSearch: _openSearch,
                     onLocate: () {
                       if (currentPosition != null) {
                         unawaited(_moveToUser(currentPosition));
@@ -109,6 +113,29 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         });
                       },
                     ),
+                  if (_customDestination != null)
+                    _DestinationSheet(
+                      destination: _customDestination!,
+                      userPosition: currentPosition,
+                      routeMode: _routeMode,
+                      routeState: _routeState,
+                      onRouteModeChanged: (mode) {
+                        setState(() {
+                          _routeMode = mode;
+                          _routeState = const AsyncData(null);
+                        });
+                      },
+                      onRoutePressed: () => _calculateRouteToTarget(
+                        currentPosition,
+                        _customDestination!,
+                      ),
+                      onClose: () {
+                        setState(() {
+                          _customDestination = null;
+                          _routeState = const AsyncData(null);
+                        });
+                      },
+                    ),
                 ],
               ),
             ),
@@ -125,11 +152,51 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void _openDetails(ActiveLocation location) {
     setState(() {
       _selectedLocation = location;
+      _customDestination = null;
       _routeState = const AsyncData(null);
     });
     unawaited(
       _mapController?.animateCamera(
         CameraUpdate.newLatLng(LatLng(location.latitude, location.longitude)),
+      ),
+    );
+  }
+
+  void _setCustomDestination(LatLng position) {
+    final target = _RouteTarget(
+      id: 'custom-${position.latitude}-${position.longitude}',
+      title: 'Secilen hedef',
+      subtitle:
+          '${position.latitude.toStringAsFixed(5)}, ${position.longitude.toStringAsFixed(5)}',
+      position: position,
+    );
+
+    setState(() {
+      _selectedLocation = null;
+      _customDestination = target;
+      _routeState = const AsyncData(null);
+    });
+  }
+
+  Future<void> _openSearch() async {
+    final result = await showModalBottomSheet<_RouteTarget>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => const _RouteSearchSheet(),
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      _selectedLocation = null;
+      _customDestination = result;
+      _routeState = const AsyncData(null);
+    });
+
+    await _mapController?.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(target: result.position, zoom: 15),
       ),
     );
   }
@@ -149,6 +216,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final selected = _selectedLocation;
     if (selected == null) return;
 
+    await _calculateRouteToTarget(
+      position,
+      _RouteTarget(
+        id: selected.id,
+        title: selected.title,
+        subtitle: selected.formattedAddress,
+        position: LatLng(selected.latitude, selected.longitude),
+      ),
+    );
+  }
+
+  Future<void> _calculateRouteToTarget(
+    Position? position,
+    _RouteTarget target,
+  ) async {
     if (position == null) {
       ref.invalidate(currentPositionProvider);
       setState(() {
@@ -164,7 +246,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           .read(routesRepositoryProvider)
           .calculateRoute(
             origin: LatLng(position.latitude, position.longitude),
-            destination: LatLng(selected.latitude, selected.longitude),
+            destination: target.position,
             mode: _routeMode,
           );
 
@@ -207,17 +289,21 @@ class _AlertMap extends StatelessWidget {
     required this.locations,
     required this.position,
     required this.selectedLocation,
+    required this.customDestination,
     required this.route,
     required this.onMapCreated,
     required this.onMarkerTap,
+    required this.onLongPress,
   });
 
   final List<ActiveLocation> locations;
   final Position? position;
   final ActiveLocation? selectedLocation;
+  final _RouteTarget? customDestination;
   final RouteResult? route;
   final ValueChanged<GoogleMapController> onMapCreated;
   final ValueChanged<ActiveLocation> onMarkerTap;
+  final ValueChanged<LatLng> onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -228,6 +314,7 @@ class _AlertMap extends StatelessWidget {
     return GoogleMap(
       initialCameraPosition: CameraPosition(target: initialTarget, zoom: 11.5),
       onMapCreated: onMapCreated,
+      onLongPress: onLongPress,
       myLocationButtonEnabled: false,
       myLocationEnabled: position != null,
       zoomControlsEnabled: false,
@@ -257,6 +344,19 @@ class _AlertMap extends StatelessWidget {
             zIndexInt: selectedLocation?.id == location.id ? 2 : 1,
             onTap: () => onMarkerTap(location),
           ),
+        if (customDestination != null)
+          Marker(
+            markerId: MarkerId(customDestination!.id),
+            position: customDestination!.position,
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueGreen,
+            ),
+            infoWindow: InfoWindow(
+              title: customDestination!.title,
+              snippet: customDestination!.subtitle,
+            ),
+            zIndexInt: 3,
+          ),
       },
     );
   }
@@ -276,12 +376,14 @@ class _TopBar extends StatelessWidget {
     required this.count,
     required this.isLoading,
     required this.onRefresh,
+    required this.onSearch,
     required this.onLocate,
   });
 
   final int? count;
   final bool isLoading;
   final VoidCallback onRefresh;
+  final VoidCallback onSearch;
   final VoidCallback onLocate;
 
   @override
@@ -329,6 +431,12 @@ class _TopBar extends StatelessWidget {
           icon: isLoading ? Icons.sync : Icons.refresh,
           tooltip: 'Yenile',
           onPressed: onRefresh,
+        ),
+        const SizedBox(width: 8),
+        _MapButton(
+          icon: Icons.search,
+          tooltip: 'Hedef ara',
+          onPressed: onSearch,
         ),
         const SizedBox(width: 8),
         _MapButton(
@@ -564,12 +672,335 @@ class _LocationSheet extends StatelessWidget {
     if (text.contains('Konum izni gerekiyor')) {
       return 'Rota icin konum izni gerekiyor.';
     }
-    return 'Rota hesaplanamadi. Birazdan tekrar dene.';
+    return 'Rota hesaplanamadi. Emulator konumu Istanbul disindaysa konumu Istanbul yapip tekrar dene.';
   }
 
   RouteResult? get _routeResult {
     return routeState.whenOrNull(data: (value) => value);
   }
+}
+
+class _DestinationSheet extends StatelessWidget {
+  const _DestinationSheet({
+    required this.destination,
+    required this.userPosition,
+    required this.routeMode,
+    required this.routeState,
+    required this.onRouteModeChanged,
+    required this.onRoutePressed,
+    required this.onClose,
+  });
+
+  final _RouteTarget destination;
+  final Position? userPosition;
+  final RouteMode routeMode;
+  final AsyncValue<RouteResult?> routeState;
+  final ValueChanged<RouteMode> onRouteModeChanged;
+  final VoidCallback onRoutePressed;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final distance = userPosition == null
+        ? null
+        : Geolocator.distanceBetween(
+            userPosition!.latitude,
+            userPosition!.longitude,
+            destination.position.latitude,
+            destination.position.longitude,
+          );
+    final routeResult = routeState.whenOrNull(data: (value) => value);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x2B111111),
+            blurRadius: 22,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 12,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1F7A5A),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        destination.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        destination.subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFF59636E),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Kapat',
+                  icon: const Icon(Icons.close),
+                  onPressed: onClose,
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (distance != null)
+              _InfoChip(
+                icon: Icons.near_me_outlined,
+                label: _LocationSheet._distanceLabel(distance),
+              ),
+            const SizedBox(height: 14),
+            SegmentedButton<RouteMode>(
+              segments: [
+                for (final mode in RouteMode.values)
+                  ButtonSegment<RouteMode>(
+                    value: mode,
+                    icon: Icon(
+                      mode == RouteMode.motorcycle
+                          ? Icons.two_wheeler
+                          : Icons.directions_car_outlined,
+                    ),
+                    label: Text(mode.label),
+                  ),
+              ],
+              selected: {routeMode},
+              onSelectionChanged: (selected) {
+                onRouteModeChanged(selected.first);
+              },
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: routeState.isLoading ? null : onRoutePressed,
+                icon: routeState.isLoading
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.navigation_outlined),
+                label: Text(
+                  routeState.isLoading ? 'Rota hesaplaniyor' : 'Rota olustur',
+                ),
+              ),
+            ),
+            if (routeState.hasError) ...[
+              const SizedBox(height: 8),
+              Text(
+                _LocationSheet._routeErrorMessage(routeState.error),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            if (routeResult != null) ...[
+              const SizedBox(height: 10),
+              _RouteSummary(route: routeResult),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RouteSearchSheet extends ConsumerStatefulWidget {
+  const _RouteSearchSheet();
+
+  @override
+  ConsumerState<_RouteSearchSheet> createState() => _RouteSearchSheetState();
+}
+
+class _RouteSearchSheetState extends ConsumerState<_RouteSearchSheet> {
+  final _controller = TextEditingController();
+  AsyncValue<List<RouteSearchResult>> _results = const AsyncData([]);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + bottomInset),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Hedef ara',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Kapat',
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Orn. Taksim, Kadikoy, Perpa',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: IconButton(
+                tooltip: 'Ara',
+                icon: const Icon(Icons.arrow_forward),
+                onPressed: _search,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onSubmitted: (_) => _search(),
+          ),
+          const SizedBox(height: 12),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 360),
+            child: _results.when(
+              data: (items) {
+                if (items.isEmpty) {
+                  return const _SearchEmptyState();
+                }
+
+                return ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: items.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final item = items[index];
+                    return ListTile(
+                      leading: const Icon(Icons.place_outlined),
+                      title: Text(item.title),
+                      subtitle: Text(
+                        item.formattedAddress,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () {
+                        Navigator.of(context).pop(
+                          _RouteTarget(
+                            id: item.id,
+                            title: item.title,
+                            subtitle: item.formattedAddress,
+                            position: item.position,
+                          ),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+              error: (_, _) => const _SearchErrorState(),
+              loading: () => const Padding(
+                padding: EdgeInsets.all(24),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _search() async {
+    final query = _controller.text.trim();
+    if (query.length < 2) return;
+
+    setState(() => _results = const AsyncLoading());
+
+    try {
+      final results = await ref
+          .read(routesRepositoryProvider)
+          .searchDestinations(query);
+      setState(() => _results = AsyncData(results));
+    } catch (error, stackTrace) {
+      setState(() => _results = AsyncError(error, stackTrace));
+    }
+  }
+}
+
+class _SearchEmptyState extends StatelessWidget {
+  const _SearchEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(24),
+      child: Text(
+        'Hedef arayabilir veya haritada uzun basarak hedef secebilirsin.',
+      ),
+    );
+  }
+}
+
+class _SearchErrorState extends StatelessWidget {
+  const _SearchErrorState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(24),
+      child: Text(
+        'Arama yapilamadi. Backend Google Geocoding ayarini kontrol et.',
+      ),
+    );
+  }
+}
+
+class _RouteTarget {
+  const _RouteTarget({
+    required this.id,
+    required this.title,
+    required this.subtitle,
+    required this.position,
+  });
+
+  final String id;
+  final String title;
+  final String subtitle;
+  final LatLng position;
 }
 
 class _RouteSummary extends StatelessWidget {

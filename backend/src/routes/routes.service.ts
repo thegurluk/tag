@@ -26,6 +26,67 @@ export class RoutesService {
     return route;
   }
 
+  async search(query?: string) {
+    const normalizedQuery = query?.trim();
+    if (!normalizedQuery || normalizedQuery.length < 2) {
+      throw new BadRequestException('Search query must be at least 2 characters');
+    }
+
+    const apiKey = this.config.get<string>('GOOGLE_MAPS_API_KEY');
+    if (!apiKey || apiKey === 'change_me') {
+      throw new ServiceUnavailableException('Google API key is not configured');
+    }
+
+    const searchText = `${normalizedQuery} İstanbul`;
+    const params = new URLSearchParams({
+      address: searchText,
+      key: apiKey,
+      language: 'tr',
+      region: 'tr',
+      components: 'country:TR',
+    });
+
+    const response = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`,
+    );
+
+    if (!response.ok) {
+      throw new BadRequestException(`Google Geocoding API failed with ${response.status}`);
+    }
+
+    const data = (await response.json()) as {
+      status?: string;
+      results?: Array<{
+        place_id?: string;
+        formatted_address?: string;
+        geometry?: { location?: { lat?: number; lng?: number } };
+        address_components?: Array<{
+          long_name: string;
+          short_name: string;
+          types: string[];
+        }>;
+      }>;
+    };
+
+    if (data.status && !['OK', 'ZERO_RESULTS'].includes(data.status)) {
+      throw new BadRequestException(`Google Geocoding API returned ${data.status}`);
+    }
+
+    return (data.results ?? [])
+      .slice(0, 5)
+      .map((result) => {
+        const location = result.geometry?.location;
+        return {
+          id: result.place_id ?? result.formatted_address ?? `${location?.lat},${location?.lng}`,
+          title: this.pickResultTitle(result.address_components, result.formatted_address),
+          formatted_address: result.formatted_address ?? '',
+          latitude: location?.lat,
+          longitude: location?.lng,
+        };
+      })
+      .filter((result) => typeof result.latitude === 'number' && typeof result.longitude === 'number');
+  }
+
   private async requestRoute(
     dto: CalculateRouteDto,
     travelMode: 'DRIVE' | 'TWO_WHEELER',
@@ -87,5 +148,18 @@ export class RoutesService {
   private parseGoogleDuration(duration?: string): number {
     if (!duration) return 0;
     return Number(duration.replace('s', '')) || 0;
+  }
+
+  private pickResultTitle(
+    components?: Array<{ long_name: string; types: string[] }>,
+    formattedAddress?: string,
+  ): string {
+    const preferred = components?.find((component) =>
+      component.types.some((type) =>
+        ['point_of_interest', 'establishment', 'route', 'neighborhood', 'locality'].includes(type),
+      ),
+    );
+
+    return preferred?.long_name ?? formattedAddress?.split(',')[0] ?? 'Konum';
   }
 }

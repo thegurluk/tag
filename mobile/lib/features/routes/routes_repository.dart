@@ -32,4 +32,17 @@ class RoutesRepository {
 
     return RouteResult.fromJson(data);
   }
+
+  Future<List<RouteSearchResult>> searchDestinations(String query) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/routes/search',
+      queryParameters: {'q': query},
+    );
+    final data = response.data ?? const [];
+
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(RouteSearchResult.fromJson)
+        .toList(growable: false);
+  }
 }

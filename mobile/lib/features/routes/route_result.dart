@@ -39,6 +39,32 @@ class RouteResult {
   }
 }
 
+class RouteSearchResult {
+  const RouteSearchResult({
+    required this.id,
+    required this.title,
+    required this.formattedAddress,
+    required this.position,
+  });
+
+  final String id;
+  final String title;
+  final String formattedAddress;
+  final LatLng position;
+
+  factory RouteSearchResult.fromJson(Map<String, dynamic> json) {
+    return RouteSearchResult(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? 'Konum',
+      formattedAddress: json['formatted_address'] as String? ?? '',
+      position: LatLng(
+        (json['latitude'] as num).toDouble(),
+        (json['longitude'] as num).toDouble(),
+      ),
+    );
+  }
+}
+
 List<LatLng> decodePolyline(String encoded) {
   final points = <LatLng>[];
   var index = 0;

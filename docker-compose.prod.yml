@@ -44,7 +44,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
       GOOGLE_CITY_CONTEXT: Istanbul
-      GOOGLE_MIN_CONFIDENCE: "0.65"
+      GOOGLE_MIN_CONFIDENCE: ${GOOGLE_MIN_CONFIDENCE:-0.5}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
     command: sh -c "npx prisma migrate deploy && node dist/main.js"
 
@@ -64,7 +64,7 @@ services:
       REDIS_PORT: 6379
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
       GOOGLE_CITY_CONTEXT: Istanbul
-      GOOGLE_MIN_CONFIDENCE: "0.65"
+      GOOGLE_MIN_CONFIDENCE: ${GOOGLE_MIN_CONFIDENCE:-0.5}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
     command: node dist/worker.js
 

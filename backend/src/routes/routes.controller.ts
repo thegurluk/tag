@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { CalculateRouteDto } from './dto/calculate-route.dto';
 import { RoutesService } from './routes.service';
 
@@ -9,5 +9,10 @@ export class RoutesController {
   @Post('calculate')
   calculate(@Body() dto: CalculateRouteDto) {
     return this.routesService.calculate(dto);
+  }
+
+  @Get('search')
+  search(@Query('q') query: string) {
+    return this.routesService.search(query);
   }
 }
