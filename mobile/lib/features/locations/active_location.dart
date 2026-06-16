@@ -25,6 +25,10 @@ class ActiveLocation {
     required this.expiresAt,
     required this.color,
     required this.ageMinutes,
+    required this.rawMessage,
+    required this.cleanedLocationText,
+    required this.confidenceScore,
+    required this.status,
   });
 
   final String id;
@@ -36,6 +40,10 @@ class ActiveLocation {
   final DateTime expiresAt;
   final AlertColor color;
   final int ageMinutes;
+  final String rawMessage;
+  final String cleanedLocationText;
+  final double confidenceScore;
+  final String status;
 
   factory ActiveLocation.fromJson(Map<String, dynamic> json) {
     return ActiveLocation(
@@ -48,6 +56,10 @@ class ActiveLocation {
       expiresAt: DateTime.parse(json['expires_at'] as String).toLocal(),
       color: AlertColor.fromApi(json['color'] as String? ?? 'red'),
       ageMinutes: (json['age_minutes'] as num?)?.toInt() ?? 0,
+      rawMessage: json['raw_message'] as String? ?? '',
+      cleanedLocationText: json['cleaned_location_text'] as String? ?? '',
+      confidenceScore: (json['confidence_score'] as num?)?.toDouble() ?? 0,
+      status: json['status'] as String? ?? 'active',
     );
   }
 

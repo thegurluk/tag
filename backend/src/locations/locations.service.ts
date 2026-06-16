@@ -26,7 +26,56 @@ export class LocationsService {
       expires_at: location.expiresAt,
       color: getLocationColor(location.createdAt),
       age_minutes: getLocationAgeMinutes(location.createdAt),
+      raw_message: location.rawMessage,
+      cleaned_location_text: location.cleanedLocationText,
+      confidence_score: location.confidenceScore,
+      status: location.status,
     }));
+  }
+
+  async getLocationDetail(id: string) {
+    const location = await this.prisma.activeLocation.findUnique({
+      where: { id },
+      include: { telegramMessage: true },
+    });
+
+    if (!location) {
+      throw new BadRequestException('Location not found');
+    }
+
+    return {
+      id: location.id,
+      title: location.title ?? location.cleanedLocationText,
+      raw_message: location.rawMessage,
+      cleaned_location_text: location.cleanedLocationText,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      formatted_address: location.formattedAddress,
+      google_place_id: location.googlePlaceId,
+      confidence_score: location.confidenceScore,
+      status: location.status,
+      created_at: location.createdAt,
+      expires_at: location.expiresAt,
+      color: getLocationColor(location.createdAt),
+      age_minutes: getLocationAgeMinutes(location.createdAt),
+      telegram_message: location.telegramMessage
+        ? {
+            id: location.telegramMessage.id,
+            telegram_message_id: location.telegramMessage.telegramMessageId.toString(),
+            telegram_group_id: location.telegramMessage.telegramGroupId.toString(),
+            sender_id: location.telegramMessage.senderId?.toString() ?? null,
+            raw_text: location.telegramMessage.rawText,
+            received_at: location.telegramMessage.receivedAt,
+            processed: location.telegramMessage.processed,
+            processing_error: location.telegramMessage.processingError,
+          }
+        : null,
+    };
+  }
+
+  async deleteActiveLocation(id: string) {
+    await this.prisma.activeLocation.delete({ where: { id } });
+    return { success: true };
   }
 
   async getNearbyLocations(lat: number, lng: number, radiusMeters: number) {

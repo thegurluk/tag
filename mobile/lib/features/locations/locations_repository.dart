@@ -16,4 +16,8 @@ class LocationsRepository {
         .map(ActiveLocation.fromJson)
         .toList(growable: false);
   }
+
+  Future<void> deleteActiveLocation(String id) async {
+    await _dio.delete<void>('/locations/$id');
+  }
 }

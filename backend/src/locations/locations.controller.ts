@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Query } from '@nestjs/common';
 import { LocationsService } from './locations.service';
 
 @Controller('locations')
@@ -26,5 +26,15 @@ export class LocationsController {
   @Get('archive')
   getArchive() {
     return this.locationsService.getArchive();
+  }
+
+  @Get(':id')
+  getById(@Param('id') id: string) {
+    return this.locationsService.getLocationDetail(id);
+  }
+
+  @Delete(':id')
+  deleteById(@Param('id') id: string) {
+    return this.locationsService.deleteActiveLocation(id);
   }
 }

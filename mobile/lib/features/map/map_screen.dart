@@ -83,6 +83,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   _TopBar(
                     count: activeLocations?.length,
                     isLoading: locations.isLoading,
+                    onOpenList: () =>
+                        _openMarkerList(activeLocations ?? const []),
                     onRefresh: _refresh,
                     onSearch: _openSearch,
                     onLocate: () {
@@ -159,6 +161,70 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   void _refresh() {
     ref.invalidate(activeLocationsProvider);
+  }
+
+  Future<void> _openMarkerList(List<ActiveLocation> locations) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => _MarkerListSheet(
+        locations: locations,
+        onOpenLocation: (location) {
+          Navigator.of(context).pop();
+          _openDetails(location);
+        },
+        onDeleteLocation: _deleteLocation,
+      ),
+    );
+  }
+
+  Future<void> _deleteLocation(ActiveLocation location) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Marker silinsin mi?'),
+        content: Text(
+          '${location.title}\n\nBu marker aktif haritadan kaldirilacak.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Vazgec'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Sil'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await ref
+          .read(locationsRepositoryProvider)
+          .deleteActiveLocation(location.id);
+      if (!mounted) return;
+      if (_selectedLocation?.id == location.id) {
+        setState(() {
+          _selectedLocation = null;
+          _routeState = const AsyncData(null);
+        });
+      }
+      ref.invalidate(activeLocationsProvider);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${location.title} silindi')));
+      Navigator.of(context).maybePop();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Marker silinemedi: $error')));
+    }
   }
 
   void _openDetails(ActiveLocation location) {
@@ -435,6 +501,7 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.count,
     required this.isLoading,
+    required this.onOpenList,
     required this.onRefresh,
     required this.onSearch,
     required this.onLocate,
@@ -442,6 +509,7 @@ class _TopBar extends StatelessWidget {
 
   final int? count;
   final bool isLoading;
+  final VoidCallback onOpenList;
   final VoidCallback onRefresh;
   final VoidCallback onSearch;
   final VoidCallback onLocate;
@@ -450,6 +518,12 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
+        _MapButton(
+          icon: Icons.menu,
+          tooltip: 'Marker listesi',
+          onPressed: onOpenList,
+        ),
+        const SizedBox(width: 8),
         Expanded(
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -505,6 +579,303 @@ class _TopBar extends StatelessWidget {
           onPressed: onLocate,
         ),
       ],
+    );
+  }
+}
+
+class _MarkerListSheet extends StatelessWidget {
+  const _MarkerListSheet({
+    required this.locations,
+    required this.onOpenLocation,
+    required this.onDeleteLocation,
+  });
+
+  final List<ActiveLocation> locations;
+  final ValueChanged<ActiveLocation> onOpenLocation;
+  final ValueChanged<ActiveLocation> onDeleteLocation;
+
+  @override
+  Widget build(BuildContext context) {
+    final height = MediaQuery.sizeOf(context).height * 0.82;
+
+    return SizedBox(
+      height: height,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Aktif markerlar',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${locations.length}',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: const Color(0xFF59636E),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Kapat',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: locations.isEmpty
+                ? const _MarkerListEmpty()
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 18),
+                    itemCount: locations.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final location = locations[index];
+                      return _MarkerListItem(
+                        index: index + 1,
+                        location: location,
+                        onOpen: () => onOpenLocation(location),
+                        onShowMessage: () =>
+                            _showMarkerMessage(context, location),
+                        onDelete: () => onDeleteLocation(location),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Future<void> _showMarkerMessage(
+    BuildContext context,
+    ActiveLocation location,
+  ) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Mesaj detayi'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _DetailLine(label: 'Baslik', value: location.title),
+              _DetailLine(
+                label: 'Ham mesaj',
+                value: location.rawMessage.isEmpty
+                    ? 'Ham mesaj yok'
+                    : location.rawMessage,
+              ),
+              _DetailLine(
+                label: 'Temizlenen metin',
+                value: location.cleanedLocationText.isEmpty
+                    ? location.title
+                    : location.cleanedLocationText,
+              ),
+              _DetailLine(
+                label: 'Adres',
+                value: location.formattedAddress.isEmpty
+                    ? 'Adres bilgisi yok'
+                    : location.formattedAddress,
+              ),
+              _DetailLine(
+                label: 'Koordinat',
+                value:
+                    '${location.latitude.toStringAsFixed(6)}, ${location.longitude.toStringAsFixed(6)}',
+              ),
+              _DetailLine(
+                label: 'Confidence',
+                value: location.confidenceScore.toStringAsFixed(2),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Kapat'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MarkerListItem extends StatelessWidget {
+  const _MarkerListItem({
+    required this.index,
+    required this.location,
+    required this.onOpen,
+    required this.onShowMessage,
+    required this.onDelete,
+  });
+
+  final int index;
+  final ActiveLocation location;
+  final VoidCallback onOpen;
+  final VoidCallback onShowMessage;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE2E5E8)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: location.accentColor,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '$index',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        location.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        location.formattedAddress.isEmpty
+                            ? 'Adres bilgisi yok'
+                            : location.formattedAddress,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF59636E),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Sil',
+                  icon: const Icon(Icons.delete_outline),
+                  color: const Color(0xFFB3261E),
+                  onPressed: onDelete,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _InfoChip(
+                  icon: Icons.schedule,
+                  label: _LocationSheet._ageLabel(location.ageMinutes),
+                ),
+                _InfoChip(
+                  icon: Icons.flag_outlined,
+                  label: location.statusLabel,
+                ),
+                _InfoChip(
+                  icon: Icons.percent,
+                  label: location.confidenceScore.toStringAsFixed(2),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onShowMessage,
+                    icon: const Icon(Icons.article_outlined),
+                    label: const Text('Mesaj'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: onOpen,
+                    icon: const Icon(Icons.place_outlined),
+                    label: const Text('Haritada ac'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MarkerListEmpty extends StatelessWidget {
+  const _MarkerListEmpty();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Text('Aktif marker yok.'),
+      ),
+    );
+  }
+}
+
+class _DetailLine extends StatelessWidget {
+  const _DetailLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: const Color(0xFF59636E),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(value, style: Theme.of(context).textTheme.bodyMedium),
+        ],
+      ),
     );
   }
 }
