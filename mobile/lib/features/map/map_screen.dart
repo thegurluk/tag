@@ -28,6 +28,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   _RouteTarget? _customDestination;
   RouteMode _routeMode = RouteMode.motorcycle;
   AsyncValue<RouteResult?> _routeState = const AsyncData(null);
+  final Set<String> _deletedLocationIds = {};
 
   @override
   void dispose() {
@@ -41,6 +42,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final position = ref.watch(currentPositionProvider);
     final currentPosition = position.whenOrNull(data: (value) => value);
     final activeLocations = locations.whenOrNull(data: (value) => value);
+    final visibleLocations = activeLocations
+        ?.where((location) => !_deletedLocationIds.contains(location.id))
+        .toList(growable: false);
     final route = _routeState.whenOrNull(data: (value) => value);
 
     return Scaffold(
@@ -48,7 +52,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         children: [
           locations.when(
             data: (items) => _AlertMap(
-              locations: items,
+              locations: items
+                  .where(
+                    (location) => !_deletedLocationIds.contains(location.id),
+                  )
+                  .toList(growable: false),
               position: currentPosition,
               selectedLocation: _selectedLocation,
               customDestination: _customDestination,
@@ -81,10 +89,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _TopBar(
-                    count: activeLocations?.length,
+                    count: visibleLocations?.length,
                     isLoading: locations.isLoading,
                     onOpenList: () =>
-                        _openMarkerList(activeLocations ?? const []),
+                        _openMarkerList(visibleLocations ?? const []),
                     onRefresh: _refresh,
                     onSearch: _openSearch,
                     onLocate: () {
@@ -180,45 +188,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   Future<void> _deleteLocation(ActiveLocation location) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Marker silinsin mi?'),
-        content: Text(
-          '${location.title}\n\nBu marker aktif haritadan kaldirilacak.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Vazgec'),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(context).pop(true),
-            icon: const Icon(Icons.delete_outline),
-            label: const Text('Sil'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
     try {
       await ref
           .read(locationsRepositoryProvider)
           .deleteActiveLocation(location.id);
       if (!mounted) return;
-      if (_selectedLocation?.id == location.id) {
-        setState(() {
+      setState(() {
+        _deletedLocationIds.add(location.id);
+        if (_selectedLocation?.id == location.id) {
           _selectedLocation = null;
           _routeState = const AsyncData(null);
-        });
-      }
+        }
+      });
       ref.invalidate(activeLocationsProvider);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('${location.title} silindi')));
-      Navigator.of(context).maybePop();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -583,7 +565,7 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-class _MarkerListSheet extends StatelessWidget {
+class _MarkerListSheet extends StatefulWidget {
   const _MarkerListSheet({
     required this.locations,
     required this.onOpenLocation,
@@ -593,6 +575,19 @@ class _MarkerListSheet extends StatelessWidget {
   final List<ActiveLocation> locations;
   final ValueChanged<ActiveLocation> onOpenLocation;
   final ValueChanged<ActiveLocation> onDeleteLocation;
+
+  @override
+  State<_MarkerListSheet> createState() => _MarkerListSheetState();
+}
+
+class _MarkerListSheetState extends State<_MarkerListSheet> {
+  late List<ActiveLocation> _locations;
+
+  @override
+  void initState() {
+    super.initState();
+    _locations = List.of(widget.locations);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -615,7 +610,7 @@ class _MarkerListSheet extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${locations.length}',
+                  '${_locations.length}',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
                     color: const Color(0xFF59636E),
                     fontWeight: FontWeight.w700,
@@ -631,21 +626,28 @@ class _MarkerListSheet extends StatelessWidget {
           ),
           const Divider(height: 1),
           Expanded(
-            child: locations.isEmpty
+            child: _locations.isEmpty
                 ? const _MarkerListEmpty()
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(12, 10, 12, 18),
-                    itemCount: locations.length,
+                    itemCount: _locations.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      final location = locations[index];
+                      final location = _locations[index];
                       return _MarkerListItem(
                         index: index + 1,
                         location: location,
-                        onOpen: () => onOpenLocation(location),
+                        onOpen: () => widget.onOpenLocation(location),
                         onShowMessage: () =>
                             _showMarkerMessage(context, location),
-                        onDelete: () => onDeleteLocation(location),
+                        onDelete: () {
+                          setState(() {
+                            _locations.removeWhere(
+                              (item) => item.id == location.id,
+                            );
+                          });
+                          widget.onDeleteLocation(location);
+                        },
                       );
                     },
                   ),
