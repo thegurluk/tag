@@ -34,11 +34,33 @@ export class LocationProcessor extends WorkerHost {
       return;
     }
 
+    if (this.cleaner.shouldSkip(message.rawText)) {
+      await this.prisma.telegramMessage.update({
+        where: { id: message.id },
+        data: {
+          processed: true,
+          processingError: 'Skipped non-alert or clear/confirmation message',
+        },
+      });
+      return;
+    }
+
     const cleanedText = this.cleaner.clean(message.rawText);
     if (!cleanedText) {
       await this.prisma.telegramMessage.update({
         where: { id: message.id },
         data: { processed: false, processingError: 'Message did not contain a usable location' },
+      });
+      return;
+    }
+
+    if (!this.cleaner.isLikelyLocation(cleanedText)) {
+      await this.prisma.telegramMessage.update({
+        where: { id: message.id },
+        data: {
+          processed: true,
+          processingError: `Skipped unlikely location text: ${cleanedText}`,
+        },
       });
       return;
     }
