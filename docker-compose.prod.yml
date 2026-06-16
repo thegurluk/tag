@@ -1,0 +1,108 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: location_app
+      POSTGRES_USER: location_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/prisma/init-postgis.sql:/docker-entrypoint-initdb.d/01-init-postgis.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U location_user -d location_app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://location_user:${POSTGRES_PASSWORD}@postgres:5432/location_app
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      GOOGLE_CITY_CONTEXT: Istanbul
+      GOOGLE_MIN_CONFIDENCE: "0.65"
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
+    command: sh -c "npx prisma migrate deploy && node dist/main.js"
+
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://location_user:${POSTGRES_PASSWORD}@postgres:5432/location_app
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      GOOGLE_CITY_CONTEXT: Istanbul
+      GOOGLE_MIN_CONFIDENCE: "0.65"
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
+    command: node dist/worker.js
+
+  telegram-listener:
+    build:
+      context: ./telegram-listener
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      TELEGRAM_TARGET_GROUP_ID: ${TELEGRAM_TARGET_GROUP_ID}
+      BACKEND_TELEGRAM_WEBHOOK_URL: http://backend:3000/api/telegram/message
+      BACKEND_TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
+    volumes:
+      - telegram_session:/app/session
+    command: python telegram_listener.py
+
+  caddy:
+    image: caddy:2-alpine
+    profiles:
+      - domain
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  telegram_session:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,95 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis, pgcrypto]
+}
+
+model User {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String?          @unique @db.VarChar(255)
+  phone        String?          @db.VarChar(50)
+  passwordHash String?          @map("password_hash")
+  role         String           @default("user") @db.VarChar(50)
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  reports      LocationReport[]
+
+  @@map("users")
+}
+
+model TelegramMessage {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  telegramMessageId BigInt           @map("telegram_message_id")
+  telegramGroupId   BigInt           @map("telegram_group_id")
+  senderId          BigInt?          @map("sender_id")
+  rawText           String           @map("raw_text")
+  receivedAt        DateTime         @map("received_at")
+  processed         Boolean          @default(false)
+  processingError   String?          @map("processing_error")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  activeLocations   ActiveLocation[]
+
+  @@unique([telegramMessageId, telegramGroupId])
+  @@map("telegram_messages")
+}
+
+model ActiveLocation {
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  telegramMessageId   String?           @map("telegram_message_id") @db.Uuid
+  telegramMessage     TelegramMessage?  @relation(fields: [telegramMessageId], references: [id], onDelete: SetNull)
+  title               String?           @db.VarChar(255)
+  rawMessage          String?           @map("raw_message")
+  cleanedLocationText String            @map("cleaned_location_text")
+  latitude            Float
+  longitude           Float
+  geom                Unsupported("geography(Point, 4326)")?
+  formattedAddress    String?           @map("formatted_address")
+  googlePlaceId       String?           @map("google_place_id")
+  confidenceScore     Float             @default(0) @map("confidence_score")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  expiresAt           DateTime          @map("expires_at")
+  status              String            @default("active") @db.VarChar(50)
+  reports             LocationReport[]
+
+  @@index([status])
+  @@index([expiresAt])
+  @@map("active_locations")
+}
+
+model LocationArchive {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  originalLocationId  String?  @map("original_location_id") @db.Uuid
+  telegramMessageId   String?  @map("telegram_message_id") @db.Uuid
+  title               String?  @db.VarChar(255)
+  rawMessage          String?  @map("raw_message")
+  cleanedLocationText String?  @map("cleaned_location_text")
+  latitude            Float?
+  longitude           Float?
+  geom                Unsupported("geography(Point, 4326)")?
+  formattedAddress    String?  @map("formatted_address")
+  googlePlaceId       String?  @map("google_place_id")
+  confidenceScore     Float?   @map("confidence_score")
+  originalCreatedAt   DateTime? @map("original_created_at")
+  expiredAt           DateTime @default(now()) @map("expired_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@map("location_archive")
+}
+
+model LocationReport {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  locationId  String          @map("location_id") @db.Uuid
+  location    ActiveLocation  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  userId      String?         @map("user_id") @db.Uuid
+  user        User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  reportType  String?         @map("report_type") @db.VarChar(100)
+  description String?
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  @@map("location_reports")
+}
