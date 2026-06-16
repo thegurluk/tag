@@ -70,10 +70,29 @@ async def main() -> None:
         await client.disconnect()
         return
 
-    @client.on(events.NewMessage(chats=target_group_id))
+    target_raw_id = abs(target_group_id)
+    if str(target_raw_id).startswith("100"):
+        target_raw_id = int(str(target_raw_id)[3:])
+
+    def is_target_event(event) -> bool:
+        if event.chat_id in {target_group_id, target_raw_id}:
+            return True
+
+        peer = event.message.peer_id
+        channel_id = getattr(peer, "channel_id", None)
+        chat_id = getattr(peer, "chat_id", None)
+        user_id = getattr(peer, "user_id", None)
+
+        return target_raw_id in {channel_id, chat_id, user_id}
+
+    @client.on(events.NewMessage)
     async def handler(event):
+        if not is_target_event(event):
+            return
+
         text = event.message.message
         if not text:
+            logger.info("Ignored target message %s because it has no text", event.message.id)
             return
 
         if event.message.id in sent_message_ids:
@@ -93,6 +112,12 @@ async def main() -> None:
         }
 
         try:
+            logger.info(
+                "Forwarding target message %s from chat_id=%s raw=%s",
+                event.message.id,
+                event.chat_id,
+                text[:120],
+            )
             await send_to_backend(payload, backend_url, webhook_secret)
             logger.info("Forwarded Telegram message %s", event.message.id)
         except Exception:
