@@ -6,7 +6,7 @@ Monorepo for the Telegram collector, NestJS backend, and Flutter mobile app desc
 
 - `backend`: NestJS API, Prisma, BullMQ workers, PostgreSQL/PostGIS, Redis.
 - `telegram-listener`: Python Telethon listener that forwards Telegram messages to the backend.
-- `mobile`: Flutter application placeholder. The mobile app will be added after the backend MVP flow is stable.
+- `mobile`: Flutter MVP with Google Maps, active location fetching, colored markers, current location permission, and marker detail panel.
 
 ## MVP Build Order
 

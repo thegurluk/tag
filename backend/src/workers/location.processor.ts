@@ -34,6 +34,8 @@ export class LocationProcessor extends WorkerHost {
       return;
     }
 
+    this.logger.log(`Processing Telegram message ${message.telegramMessageId}: ${message.rawText.slice(0, 120)}`);
+
     if (this.cleaner.shouldSkip(message.rawText)) {
       await this.prisma.telegramMessage.update({
         where: { id: message.id },
@@ -42,6 +44,7 @@ export class LocationProcessor extends WorkerHost {
           processingError: 'Skipped non-alert or clear/confirmation message',
         },
       });
+      this.logger.log(`Skipped Telegram message ${message.telegramMessageId}: non-alert text`);
       return;
     }
 
@@ -51,6 +54,7 @@ export class LocationProcessor extends WorkerHost {
         where: { id: message.id },
         data: { processed: false, processingError: 'Message did not contain a usable location' },
       });
+      this.logger.warn(`Failed Telegram message ${message.telegramMessageId}: empty cleaned text`);
       return;
     }
 
@@ -62,6 +66,7 @@ export class LocationProcessor extends WorkerHost {
           processingError: `Skipped unlikely location text: ${cleanedText}`,
         },
       });
+      this.logger.log(`Skipped Telegram message ${message.telegramMessageId}: unlikely location "${cleanedText}"`);
       return;
     }
 
@@ -74,6 +79,7 @@ export class LocationProcessor extends WorkerHost {
           processingError: 'No geocoding result found or Google key is not configured',
         },
       });
+      this.logger.warn(`Failed Telegram message ${message.telegramMessageId}: no geocoding result for "${cleanedText}"`);
       return;
     }
 
@@ -110,5 +116,9 @@ export class LocationProcessor extends WorkerHost {
         data: { processed: true, processingError: null },
       });
     });
+
+    this.logger.log(
+      `Created ${status} location from Telegram message ${message.telegramMessageId}: "${cleanedText}" (${geocoding.latitude}, ${geocoding.longitude}) confidence=${geocoding.confidenceScore}`,
+    );
   }
 }
