@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../locations/active_location.dart';
 import '../locations/locations_providers.dart';
@@ -105,7 +106,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           _routeState = const AsyncData(null);
                         });
                       },
-                      onRoutePressed: () => _calculateRoute(currentPosition),
+                      onRoutePressed: _calculateRoute,
+                      onStartNavigation: () => _startNavigation(
+                        _RouteTarget(
+                          id: _selectedLocation!.id,
+                          title: _selectedLocation!.title,
+                          subtitle: _selectedLocation!.formattedAddress,
+                          position: LatLng(
+                            _selectedLocation!.latitude,
+                            _selectedLocation!.longitude,
+                          ),
+                        ),
+                      ),
                       onClose: () {
                         setState(() {
                           _selectedLocation = null;
@@ -125,10 +137,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           _routeState = const AsyncData(null);
                         });
                       },
-                      onRoutePressed: () => _calculateRouteToTarget(
-                        currentPosition,
-                        _customDestination!,
-                      ),
+                      onRoutePressed: () =>
+                          _calculateRouteToTarget(_customDestination!),
+                      onStartNavigation: () =>
+                          _startNavigation(_customDestination!),
                       onClose: () {
                         setState(() {
                           _customDestination = null;
@@ -212,12 +224,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  Future<void> _calculateRoute(Position? position) async {
+  Future<void> _calculateRoute() async {
     final selected = _selectedLocation;
     if (selected == null) return;
 
     await _calculateRouteToTarget(
-      position,
       _RouteTarget(
         id: selected.id,
         title: selected.title,
@@ -227,19 +238,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  Future<void> _calculateRouteToTarget(
-    Position? position,
-    _RouteTarget target,
-  ) async {
+  Future<void> _calculateRouteToTarget(_RouteTarget target) async {
+    setState(() => _routeState = const AsyncLoading());
+
+    final position = await _resolveCurrentPosition();
+
     if (position == null) {
-      ref.invalidate(currentPositionProvider);
       setState(() {
         _routeState = AsyncError('Konum izni gerekiyor', StackTrace.current);
       });
       return;
     }
-
-    setState(() => _routeState = const AsyncLoading());
 
     try {
       final route = await ref
@@ -254,6 +263,57 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       unawaited(_fitRoute(route.points));
     } catch (error, stackTrace) {
       setState(() => _routeState = AsyncError(error, stackTrace));
+    }
+  }
+
+  Future<void> _startNavigation(_RouteTarget target) async {
+    final lat = target.position.latitude;
+    final lng = target.position.longitude;
+    final nativeUri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    final webUri = Uri.https('www.google.com', '/maps/dir/', {
+      'api': '1',
+      'destination': '$lat,$lng',
+      'travelmode': 'driving',
+    });
+
+    if (await canLaunchUrl(nativeUri)) {
+      await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
+      return;
+    }
+
+    await launchUrl(webUri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<Position?> _resolveCurrentPosition() async {
+    final cached = ref
+        .read(currentPositionProvider)
+        .whenOrNull(data: (value) => value);
+    if (cached != null) return cached;
+
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return null;
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return null;
+    }
+
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
+      ref.invalidate(currentPositionProvider);
+      return position;
+    } on TimeoutException {
+      return Geolocator.getLastKnownPosition();
     }
   }
 
@@ -484,6 +544,7 @@ class _LocationSheet extends StatelessWidget {
     required this.routeState,
     required this.onRouteModeChanged,
     required this.onRoutePressed,
+    required this.onStartNavigation,
     required this.onClose,
   });
 
@@ -493,6 +554,7 @@ class _LocationSheet extends StatelessWidget {
   final AsyncValue<RouteResult?> routeState;
   final ValueChanged<RouteMode> onRouteModeChanged;
   final VoidCallback onRoutePressed;
+  final VoidCallback onStartNavigation;
   final VoidCallback onClose;
 
   @override
@@ -640,6 +702,15 @@ class _LocationSheet extends StatelessWidget {
             if (_routeResult != null) ...[
               const SizedBox(height: 10),
               _RouteSummary(route: _routeResult!),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: onStartNavigation,
+                  icon: const Icon(Icons.assistant_direction_outlined),
+                  label: const Text('Suruse basla'),
+                ),
+              ),
             ],
           ],
         ),
@@ -688,6 +759,7 @@ class _DestinationSheet extends StatelessWidget {
     required this.routeState,
     required this.onRouteModeChanged,
     required this.onRoutePressed,
+    required this.onStartNavigation,
     required this.onClose,
   });
 
@@ -697,6 +769,7 @@ class _DestinationSheet extends StatelessWidget {
   final AsyncValue<RouteResult?> routeState;
   final ValueChanged<RouteMode> onRouteModeChanged;
   final VoidCallback onRoutePressed;
+  final VoidCallback onStartNavigation;
   final VoidCallback onClose;
 
   @override
@@ -825,6 +898,15 @@ class _DestinationSheet extends StatelessWidget {
             if (routeResult != null) ...[
               const SizedBox(height: 10),
               _RouteSummary(route: routeResult),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: onStartNavigation,
+                  icon: const Icon(Icons.assistant_direction_outlined),
+                  label: const Text('Suruse basla'),
+                ),
+              ),
             ],
           ],
         ),
