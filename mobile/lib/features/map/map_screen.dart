@@ -1065,7 +1065,7 @@ class _SearchErrorState extends StatelessWidget {
     return const Padding(
       padding: EdgeInsets.all(24),
       child: Text(
-        'Arama yapilamadi. Backend Google Geocoding ayarini kontrol et.',
+        'Arama yapilamadi. Backend search endpoint deploy veya Google Geocoding ayarini kontrol et.',
       ),
     );
   }
