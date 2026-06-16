@@ -89,6 +89,7 @@ async def main() -> None:
     async def forward_message(message: Any, chat_id: int, source: str) -> None:
         text = message.message
         if not text:
+            sent_message_ids.add(message.id)
             logger.info("Ignored target message %s from %s because it has no text", message.id, source)
             return
 
