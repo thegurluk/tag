@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 from datetime import timezone
+from typing import Any
 
 import httpx
 from dotenv import load_dotenv
@@ -85,46 +86,74 @@ async def main() -> None:
 
         return target_raw_id in {channel_id, chat_id, user_id}
 
-    @client.on(events.NewMessage)
-    async def handler(event):
-        if not is_target_event(event):
-            return
-
-        text = event.message.message
+    async def forward_message(message: Any, chat_id: int, source: str) -> None:
+        text = message.message
         if not text:
-            logger.info("Ignored target message %s because it has no text", event.message.id)
+            logger.info("Ignored target message %s from %s because it has no text", message.id, source)
             return
 
-        if event.message.id in sent_message_ids:
+        if message.id in sent_message_ids:
             return
-        sent_message_ids.add(event.message.id)
+        sent_message_ids.add(message.id)
 
-        received_at = event.message.date
+        received_at = message.date
         if received_at.tzinfo is None:
             received_at = received_at.replace(tzinfo=timezone.utc)
 
         payload = {
-            "telegram_message_id": event.message.id,
+            "telegram_message_id": message.id,
             "telegram_group_id": target_group_id,
-            "sender_id": event.sender_id,
+            "sender_id": getattr(message, "sender_id", None),
             "raw_text": text,
             "received_at": received_at.astimezone(timezone.utc).isoformat(),
         }
 
         try:
             logger.info(
-                "Forwarding target message %s from chat_id=%s raw=%s",
-                event.message.id,
-                event.chat_id,
+                "Forwarding target message %s from %s chat_id=%s raw=%s",
+                message.id,
+                source,
+                chat_id,
                 text[:120],
             )
             await send_to_backend(payload, backend_url, webhook_secret)
-            logger.info("Forwarded Telegram message %s", event.message.id)
+            logger.info("Forwarded Telegram message %s", message.id)
         except Exception:
-            sent_message_ids.discard(event.message.id)
-            logger.exception("Failed to forward Telegram message %s", event.message.id)
+            sent_message_ids.discard(message.id)
+            logger.exception("Failed to forward Telegram message %s", message.id)
+
+    @client.on(events.NewMessage)
+    async def handler(event):
+        if not is_target_event(event):
+            return
+
+        await forward_message(event.message, event.chat_id, "event")
+
+    async def poll_target_messages() -> None:
+        target_entity = await client.get_entity(target_group_id)
+        logger.info("Polling fallback enabled for target group %s", target_group_id)
+
+        initial_messages = [
+            message async for message in client.iter_messages(target_entity, limit=20)
+        ]
+        for message in initial_messages:
+            sent_message_ids.add(message.id)
+        logger.info("Marked %s existing target messages as already seen", len(initial_messages))
+
+        while True:
+            try:
+                messages = [
+                    message async for message in client.iter_messages(target_entity, limit=10)
+                ]
+                for message in reversed(messages):
+                    await forward_message(message, target_group_id, "poll")
+            except Exception:
+                logger.exception("Polling target messages failed")
+
+            await asyncio.sleep(10)
 
     logger.info("Listening to Telegram group %s", target_group_id)
+    asyncio.create_task(poll_target_messages())
     await client.run_until_disconnected()
 
 
