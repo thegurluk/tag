@@ -15,19 +15,19 @@ export class TelegramService {
     const message = await this.prisma.telegramMessage.upsert({
       where: {
         telegramMessageId_telegramGroupId: {
-          telegramMessageId: dto.telegram_message_id,
-          telegramGroupId: dto.telegram_group_id,
+          telegramMessageId: BigInt(dto.telegram_message_id),
+          telegramGroupId: BigInt(dto.telegram_group_id),
         },
       },
       update: {
         rawText: dto.raw_text,
-        senderId: dto.sender_id ?? null,
+        senderId: dto.sender_id === null || dto.sender_id === undefined ? null : BigInt(dto.sender_id),
         receivedAt: new Date(dto.received_at),
       },
       create: {
-        telegramMessageId: dto.telegram_message_id,
-        telegramGroupId: dto.telegram_group_id,
-        senderId: dto.sender_id ?? null,
+        telegramMessageId: BigInt(dto.telegram_message_id),
+        telegramGroupId: BigInt(dto.telegram_group_id),
+        senderId: dto.sender_id === null || dto.sender_id === undefined ? null : BigInt(dto.sender_id),
         rawText: dto.raw_text,
         receivedAt: new Date(dto.received_at),
       },

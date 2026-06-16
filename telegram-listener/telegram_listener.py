@@ -41,6 +41,8 @@ async def send_to_backend(payload: dict, backend_url: str, webhook_secret: str) 
     headers = {"x-telegram-webhook-secret": webhook_secret}
     async with httpx.AsyncClient(timeout=10) as http:
         response = await http.post(backend_url, json=payload, headers=headers)
+        if response.is_error:
+            logger.error("Backend rejected message: %s", response.text)
         response.raise_for_status()
 
 

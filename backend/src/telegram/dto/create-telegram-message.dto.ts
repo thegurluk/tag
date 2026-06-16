@@ -1,19 +1,22 @@
 import { Transform } from 'class-transformer';
-import { IsDateString, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsInt, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
-const toBigInt = ({ value }: { value: string | number | bigint }) =>
-  typeof value === 'bigint' ? value : BigInt(value);
+const toNumber = ({ value }: { value: string | number | null | undefined }) =>
+  value === null || value === undefined ? value : Number(value);
 
 export class CreateTelegramMessageDto {
-  @Transform(toBigInt)
-  telegram_message_id!: bigint;
+  @IsInt()
+  @Transform(toNumber)
+  telegram_message_id!: number;
 
-  @Transform(toBigInt)
-  telegram_group_id!: bigint;
+  @IsInt()
+  @Transform(toNumber)
+  telegram_group_id!: number;
 
   @IsOptional()
-  @Transform(({ value }) => (value === null || value === undefined ? null : BigInt(value)))
-  sender_id?: bigint | null;
+  @IsInt()
+  @Transform(toNumber)
+  sender_id?: number | null;
 
   @IsString()
   @IsNotEmpty()
